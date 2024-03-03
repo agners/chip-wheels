@@ -1,0 +1,171 @@
+From cdaea7e190ebf60a701da629a98aa0e9927c74d1 Mon Sep 17 00:00:00 2001
+From: Leonard Hansen <leonard@hansen-net.eu>
+Date: Mon, 4 Mar 2024 00:28:15 +0100
+Subject: [PATCH] Log nodeID in exchange context
+
+---
+ src/lib/support/logging/TextOnlyLogging.h |  4 ++++
+ src/messaging/ReliableMessageContext.cpp  | 24 +++++++++++------------
+ src/messaging/ReliableMessageMgr.cpp      | 24 +++++++++++------------
+ 3 files changed, 28 insertions(+), 24 deletions(-)
+
+diff --git a/src/lib/support/logging/TextOnlyLogging.h b/src/lib/support/logging/TextOnlyLogging.h
+index d6b22f7c6c..1c5ece1b77 100644
+--- a/src/lib/support/logging/TextOnlyLogging.h
++++ b/src/lib/support/logging/TextOnlyLogging.h
+@@ -284,6 +284,10 @@ using LogRedirectCallback_t = void (*)(const char * module, uint8_t category, co
+ #define ChipLogValueExchangeIdFromReceivedHeader(payloadHeader)                                                                    \
+     ChipLogValueExchangeId((payloadHeader).GetExchangeID(), !(payloadHeader).IsInitiator())
+ 
++#define ChipLogFormatExchangeExtended ChipLogFormatExchangeId " with NodeID " "%" PRIu64 
++#define ChipLogValueExchangeExtended(ec) ChipLogValueExchange(ec),                                                                 \
++    (ec)->HasSessionHandle() ? (ec)->GetSessionHandle()->GetSubjectDescriptor().subject : kUndefinedNodeId
++
+ /**
+  * Logging helpers for protocol ids.  A protocol id is a (vendor-id,
+  * protocol-id) pair.
+diff --git a/src/messaging/ReliableMessageContext.cpp b/src/messaging/ReliableMessageContext.cpp
+index 30f00a6781..7424b59ab5 100644
+--- a/src/messaging/ReliableMessageContext.cpp
++++ b/src/messaging/ReliableMessageContext.cpp
+@@ -72,8 +72,8 @@ CHIP_ERROR ReliableMessageContext::FlushAcks()
+         {
+             ChipLogDetail(ExchangeManager,
+                           "Flushed pending ack for MessageCounter:" ChipLogFormatMessageCounter
+-                          " on exchange " ChipLogFormatExchange,
+-                          mPendingPeerAckMessageCounter, ChipLogValueExchange(GetExchangeContext()));
++                          " on exchange " ChipLogFormatExchangeExtended,
++                          mPendingPeerAckMessageCounter, ChipLogValueExchangeExtended(GetExchangeContext()));
+         }
+     }
+ 
+@@ -101,8 +101,8 @@ void ReliableMessageContext::HandleRcvdAck(uint32_t ackMessageCounter)
+         // This can happen quite easily due to a packet with a piggyback ack
+         // being lost and retransmitted.
+         ChipLogDetail(ExchangeManager,
+-                      "CHIP MessageCounter:" ChipLogFormatMessageCounter " not in RetransTable on exchange " ChipLogFormatExchange,
+-                      ackMessageCounter, ChipLogValueExchange(GetExchangeContext()));
++                      "CHIP MessageCounter:" ChipLogFormatMessageCounter " not in RetransTable on exchange " ChipLogFormatExchangeExtended,
++                      ackMessageCounter, ChipLogValueExchangeExtended(GetExchangeContext()));
+     }
+ }
+ 
+@@ -125,8 +125,8 @@ CHIP_ERROR ReliableMessageContext::HandleNeedsAckInner(uint32_t messageCounter,
+     {
+         ChipLogDetail(ExchangeManager,
+                       "Forcing tx of solitary ack for duplicate MessageCounter:" ChipLogFormatMessageCounter
+-                      " on exchange " ChipLogFormatExchange,
+-                      messageCounter, ChipLogValueExchange(GetExchangeContext()));
++                      " on exchange " ChipLogFormatExchangeExtended,
++                      messageCounter, ChipLogValueExchangeExtended(GetExchangeContext()));
+ 
+         bool wasAckPending = IsAckPending() && mPendingPeerAckMessageCounter != messageCounter;
+ 
+@@ -162,8 +162,8 @@ CHIP_ERROR ReliableMessageContext::HandleNeedsAckInner(uint32_t messageCounter,
+     {
+         ChipLogDetail(ExchangeManager,
+                       "Pending ack queue full; forcing tx of solitary ack for MessageCounter:" ChipLogFormatMessageCounter
+-                      " on exchange " ChipLogFormatExchange,
+-                      mPendingPeerAckMessageCounter, ChipLogValueExchange(GetExchangeContext()));
++                      " on exchange " ChipLogFormatExchangeExtended,
++                      mPendingPeerAckMessageCounter, ChipLogValueExchangeExtended(GetExchangeContext()));
+         // Send the Ack for the currently pending Ack in a SecureChannel::StandaloneAck message.
+         ReturnErrorOnFailure(SendStandaloneAckMessage());
+     }
+@@ -190,16 +190,16 @@ CHIP_ERROR ReliableMessageContext::SendStandaloneAckMessage()
+     {
+         ChipLogError(ExchangeManager,
+                      "Non-crit err %" CHIP_ERROR_FORMAT " sending solitary ack for MessageCounter:" ChipLogFormatMessageCounter
+-                     " on exchange " ChipLogFormatExchange,
+-                     err.Format(), mPendingPeerAckMessageCounter, ChipLogValueExchange(GetExchangeContext()));
++                     " on exchange " ChipLogFormatExchangeExtended,
++                     err.Format(), mPendingPeerAckMessageCounter, ChipLogValueExchangeExtended(GetExchangeContext()));
+         return CHIP_NO_ERROR;
+     }
+     if (err != CHIP_NO_ERROR)
+     {
+         ChipLogError(ExchangeManager,
+                      "Failed to send Solitary ack for MessageCounter:" ChipLogFormatMessageCounter
+-                     " on exchange " ChipLogFormatExchange ":%" CHIP_ERROR_FORMAT,
+-                     mPendingPeerAckMessageCounter, ChipLogValueExchange(GetExchangeContext()), err.Format());
++                     " on exchange " ChipLogFormatExchangeExtended ":%" CHIP_ERROR_FORMAT,
++                     mPendingPeerAckMessageCounter, ChipLogValueExchangeExtended(GetExchangeContext()), err.Format());
+     }
+ 
+     return err;
+diff --git a/src/messaging/ReliableMessageMgr.cpp b/src/messaging/ReliableMessageMgr.cpp
+index e22bd4db24..d6d41cd1bf 100644
+--- a/src/messaging/ReliableMessageMgr.cpp
++++ b/src/messaging/ReliableMessageMgr.cpp
+@@ -89,8 +89,8 @@ void ReliableMessageMgr::TicklessDebugDumpRetransTable(const char * log)
+ 
+     mRetransTable.ForEachActiveObject([&](auto * entry) {
+         ChipLogDetail(ExchangeManager,
+-                      "EC:" ChipLogFormatExchange " MessageCounter:" ChipLogFormatMessageCounter " NextRetransTimeCtr:%" PRIu64,
+-                      ChipLogValueExchange(&entry->ec.Get()), entry->retainedBuf.GetMessageCounter(),
++                      "EC:" ChipLogFormatExchangeExtended " MessageCounter:" ChipLogFormatMessageCounter " NextRetransTimeCtr:%" PRIu64,
++                      ChipLogValueExchangeExtended(&entry->ec.Get()), entry->retainedBuf.GetMessageCounter(),
+                       entry->nextRetransTime.count());
+         return Loop::Continue;
+     });
+@@ -136,9 +136,9 @@ void ReliableMessageMgr::ExecuteActions()
+             ExchangeHandle ec(entry->ec);
+ 
+             ChipLogError(ExchangeManager,
+-                         "Failed to Send CHIP MessageCounter:" ChipLogFormatMessageCounter " on exchange " ChipLogFormatExchange
++                         "Failed to Send CHIP MessageCounter:" ChipLogFormatMessageCounter " on exchange " ChipLogFormatExchangeExtended
+                          " sendCount: %u max retries: %d",
+-                         messageCounter, ChipLogValueExchange(&ec.Get()), sendCount, CHIP_CONFIG_RMP_DEFAULT_MAX_RETRANS);
++                         messageCounter, ChipLogValueExchangeExtended(&ec.Get()), sendCount, CHIP_CONFIG_RMP_DEFAULT_MAX_RETRANS);
+ 
+             // Don't check whether the session in the exchange is valid, because when the session is released, the retrans entry is
+             // cleared inside ExchangeContext::OnSessionReleased, so the session must be valid if the entry exists.
+@@ -164,9 +164,9 @@ void ReliableMessageMgr::ExecuteActions()
+ 
+         entry->sendCount++;
+         ChipLogProgress(ExchangeManager,
+-                        "Retransmitting MessageCounter:" ChipLogFormatMessageCounter " on exchange " ChipLogFormatExchange
++                        "Retransmitting MessageCounter:" ChipLogFormatMessageCounter " on exchange " ChipLogFormatExchangeExtended
+                         " Send Cnt %d",
+-                        messageCounter, ChipLogValueExchange(&entry->ec.Get()), entry->sendCount);
++                        messageCounter, ChipLogValueExchangeExtended(&entry->ec.Get()), entry->sendCount);
+ 
+         CalculateNextRetransTime(*entry);
+         SendFromRetransTable(entry);
+@@ -284,8 +284,8 @@ bool ReliableMessageMgr::CheckAndRemRetransTable(ReliableMessageContext * rc, ui
+ 
+             ChipLogDetail(ExchangeManager,
+                           "Rxd Ack; Removing MessageCounter:" ChipLogFormatMessageCounter
+-                          " from Retrans Table on exchange " ChipLogFormatExchange,
+-                          ackMessageCounter, ChipLogValueExchange(rc->GetExchangeContext()));
++                          " from Retrans Table on exchange " ChipLogFormatExchangeExtended,
++                          ackMessageCounter, ChipLogValueExchangeExtended(rc->GetExchangeContext()));
+             removed = true;
+             return Loop::Break;
+         }
+@@ -302,9 +302,9 @@ CHIP_ERROR ReliableMessageMgr::SendFromRetransTable(RetransTableEntry * entry)
+         // Using same error message for all errors to reduce code size.
+         ChipLogError(ExchangeManager,
+                      "Crit-err %" CHIP_ERROR_FORMAT " when sending CHIP MessageCounter:" ChipLogFormatMessageCounter
+-                     " on exchange " ChipLogFormatExchange ", send tries: %d",
++                     " on exchange " ChipLogFormatExchangeExtended ", send tries: %d",
+                      CHIP_ERROR_INCORRECT_STATE.Format(), entry->retainedBuf.GetMessageCounter(),
+-                     ChipLogValueExchange(&entry->ec.Get()), entry->sendCount);
++                     ChipLogValueExchangeExtended(&entry->ec.Get()), entry->sendCount);
+         ClearRetransTable(*entry);
+         return CHIP_ERROR_INCORRECT_STATE;
+     }
+@@ -340,8 +340,8 @@ CHIP_ERROR ReliableMessageMgr::SendFromRetransTable(RetransTableEntry * entry)
+         // Using same error message for all errors to reduce code size.
+         ChipLogError(ExchangeManager,
+                      "Crit-err %" CHIP_ERROR_FORMAT " when sending CHIP MessageCounter:" ChipLogFormatMessageCounter
+-                     " on exchange " ChipLogFormatExchange ", send tries: %d",
+-                     err.Format(), entry->retainedBuf.GetMessageCounter(), ChipLogValueExchange(&entry->ec.Get()),
++                     " on exchange " ChipLogFormatExchangeExtended ", send tries: %d",
++                     err.Format(), entry->retainedBuf.GetMessageCounter(), ChipLogValueExchangeExtended(&entry->ec.Get()),
+                      entry->sendCount);
+ 
+         ClearRetransTable(*entry);
+-- 
+2.34.1
+
